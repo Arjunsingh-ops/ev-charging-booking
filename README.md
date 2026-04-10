@@ -42,26 +42,52 @@ cd ev-charging-booking
 npm install
 ```
 
-### 3. Setup Environment Variables
-To get the local development server fully working with the database and authentication, you must configure your Supabase keys.
+### 3. Setup Database & Environment Variables
 
-Create a `.env.local` file in the root directory:
-```bash
-touch .env.local
-```
+**⚡ New Users:** Start with **[QUICK_START.md](./QUICK_START.md)** for a 5-minute setup guide!
 
-Add your Supabase project URL and Anon Key to `.env.local`:
+For detailed setup instructions:
+- 📖 **[SETUP_CHECKLIST.md](./SETUP_CHECKLIST.md)** - Step-by-step checklist
+- 📚 **[DATABASE_SETUP.md](./DATABASE_SETUP.md)** - Complete technical guide
+- 🔧 **[DATABASE_FIX_SUMMARY.md](./DATABASE_FIX_SUMMARY.md)** - Overview & fixes
+
+**Quick Setup:**
+1. Create a Supabase account at https://supabase.com
+2. Get your credentials from **Settings > API**
+3. Add to Vercel environment variables (or create `.env.local`):
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
+4. Setup database (choose one method in QUICK_START.md)
 
 ### 4. Run the Development Server
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result! 
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result!
+
+---
+
+## 📖 Documentation
+
+| Document | Purpose | Read Time |
+|----------|---------|-----------|
+| **[QUICK_START.md](./QUICK_START.md)** | Fast setup (3 methods) | 5 min |
+| **[SETUP_CHECKLIST.md](./SETUP_CHECKLIST.md)** | Full verification checklist | 10 min |
+| **[DATABASE_SETUP.md](./DATABASE_SETUP.md)** | Complete technical guide | 15 min |
+| **[DATABASE_FIX_SUMMARY.md](./DATABASE_FIX_SUMMARY.md)** | Overview & what was fixed | 10 min |
+| **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** | Solve 10+ common issues | As needed |
+
+### If Something Goes Wrong
+See **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** for solutions to:
+- "Tenant or user not found" errors
+- Database table issues
+- Permission errors
+- Authentication problems
+- And 6+ more scenarios 
 
 ## 📂 Project Structure
 
