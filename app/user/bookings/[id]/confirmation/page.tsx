@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { getCurrentUser } from "@/lib/auth"
+import { getBookingById } from "@/lib/actions/bookings"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
-import { CheckCircle, Calendar, MapPin, Clock, DollarSign } from "lucide-react"
+import { CheckCircle, Calendar, MapPin, Clock, IndianRupee, Zap } from "lucide-react"
+import { formatCurrency } from "@/lib/utils"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -12,73 +14,53 @@ interface PageProps {
 
 export default async function BookingConfirmationPage({ params }: PageProps) {
   const { id } = await params
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) {
     redirect("/auth/login")
   }
 
-  // Fetch booking details
-  const { data: booking, error } = await supabase
-    .from("bookings")
-    .select(`
-      *,
-      charging_stations(
-        name,
-        address,
-        city,
-        state,
-        connector_type,
-        power_output,
-        profiles!charging_stations_lister_id_fkey(full_name)
-      )
-    `)
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .single()
-
-  if (error || !booking) {
+  const booking = await getBookingById(id)
+  if (!booking) {
     redirect("/user/dashboard")
   }
 
-  const duration = Math.round(
-    (new Date(booking.end_time).getTime() - new Date(booking.start_time).getTime()) / (1000 * 60 * 60),
+  const durationHrs = Math.max(
+    0.5,
+    Math.round(
+      ((new Date(booking.endTime).getTime() - new Date(booking.startTime).getTime()) / (1000 * 60 * 60)) * 10
+    ) / 10
   )
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       <div className="container mx-auto p-6 max-w-2xl">
         <div className="text-center mb-8">
-          <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold mb-2">Booking Confirmed!</h1>
-          <p className="text-muted-foreground">Your charging session has been successfully reserved</p>
+          <CheckCircle className="h-16 w-16 text-emerald-500 mx-auto mb-4" />
+          <h1 className="text-3xl font-bold mb-2">Reservation Confirmed!</h1>
+          <p className="text-muted-foreground">
+            Your EV charging bay is locked and reserved on the platform.
+          </p>
         </div>
 
-        <Card className="mb-6">
+        <Card className="mb-6 border-border">
           <CardHeader>
-            <CardTitle>Booking Details</CardTitle>
-            <CardDescription>Confirmation #{booking.id.slice(0, 8)}</CardDescription>
+            <CardTitle>Session Confirmation Slip</CardTitle>
+            <CardDescription>Reservation #{booking.id.slice(-8).toUpperCase()}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3">
-              <MapPin className="h-5 w-5 text-muted-foreground" />
+              <MapPin className="h-5 w-5 text-primary shrink-0" />
               <div>
-                <h3 className="font-medium">{booking.charging_stations?.name}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {booking.charging_stations?.address}, {booking.charging_stations?.city},{" "}
-                  {booking.charging_stations?.state}
-                </p>
+                <h3 className="font-semibold text-base">{booking.stationName}</h3>
+                <p className="text-sm text-muted-foreground">{booking.stationAddress}</p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <Calendar className="h-5 w-5 text-muted-foreground" />
+              <Calendar className="h-5 w-5 text-primary shrink-0" />
               <div>
                 <h3 className="font-medium">
-                  {new Date(booking.start_time).toLocaleDateString("en-US", {
+                  {new Date(booking.startTime).toLocaleDateString("en-IN", {
                     weekday: "long",
                     year: "numeric",
                     month: "long",
@@ -86,75 +68,70 @@ export default async function BookingConfirmationPage({ params }: PageProps) {
                   })}
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {new Date(booking.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} -{" "}
-                  {new Date(booking.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {new Date(booking.startTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} —{" "}
+                  {new Date(booking.endTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <Clock className="h-5 w-5 text-muted-foreground" />
+              <Zap className="h-5 w-5 text-primary shrink-0" />
               <div>
-                <h3 className="font-medium">Duration: {duration} hours</h3>
-                <p className="text-sm text-muted-foreground">
-                  {booking.charging_stations?.connector_type} • {booking.charging_stations?.power_output} kW
-                </p>
+                <h3 className="font-medium">
+                  {booking.chargerBay} ({booking.connectorType} • {booking.powerOutput} kW)
+                </h3>
+                <p className="text-sm text-muted-foreground">Scheduled Duration: {durationHrs} hours</p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <DollarSign className="h-5 w-5 text-muted-foreground" />
+              <IndianRupee className="h-5 w-5 text-primary shrink-0" />
               <div>
-                <h3 className="font-medium">Total Cost: ${booking.total_price}</h3>
+                <h3 className="font-medium">Estimated Amount: {formatCurrency(Number(booking.totalPrice))}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Payment Status: <Badge variant="secondary">Paid</Badge>
+                  Payment Status: <Badge variant="outline" className="ml-1 bg-emerald-500/10 text-emerald-400 border-emerald-500/20">Paid</Badge>
                 </p>
               </div>
             </div>
-
-            {booking.special_instructions && (
-              <div className="border-t pt-4">
-                <h4 className="font-medium mb-2">Special Instructions</h4>
-                <p className="text-sm text-muted-foreground">{booking.special_instructions}</p>
-              </div>
-            )}
           </CardContent>
         </Card>
 
-        <Card className="mb-6">
+        <Card className="mb-6 border-border">
           <CardHeader>
-            <CardTitle>What's Next?</CardTitle>
+            <CardTitle className="text-base">Arrival Guidelines</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
+              <div className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-bold shrink-0">
                 1
               </div>
               <div>
-                <h4 className="font-medium">Arrive on Time</h4>
-                <p className="text-sm text-muted-foreground">
-                  Please arrive at your scheduled time to maximize your charging session
+                <h4 className="font-medium text-sm">Arrive 5 minutes prior</h4>
+                <p className="text-xs text-muted-foreground">
+                  Park in {booking.chargerBay} to avoid queuing conflicts.
                 </p>
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
+              <div className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-bold shrink-0">
                 2
               </div>
               <div>
-                <h4 className="font-medium">Contact Station Owner</h4>
-                <p className="text-sm text-muted-foreground">
-                  Station owner: {booking.charging_stations?.profiles?.full_name}
+                <h4 className="font-medium text-sm">Plug in your EV</h4>
+                <p className="text-xs text-muted-foreground">
+                  Connect {booking.connectorType} gun to your charging inlet until the click locks.
                 </p>
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
+              <div className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-bold shrink-0">
                 3
               </div>
               <div>
-                <h4 className="font-medium">Start Charging</h4>
-                <p className="text-sm text-muted-foreground">Connect your vehicle and begin your charging session</p>
+                <h4 className="font-medium text-sm">Automated Dispensing</h4>
+                <p className="text-xs text-muted-foreground">
+                  The charger will automatically begin delivery corresponding to this booking.
+                </p>
               </div>
             </div>
           </CardContent>
@@ -162,10 +139,10 @@ export default async function BookingConfirmationPage({ params }: PageProps) {
 
         <div className="flex flex-col sm:flex-row gap-4">
           <Button asChild className="flex-1">
-            <Link href="/user/bookings">View All Bookings</Link>
+            <Link href="/user/bookings">View All Reservations</Link>
           </Button>
-          <Button asChild variant="outline" className="flex-1 bg-transparent">
-            <Link href="/user/dashboard">Back to Dashboard</Link>
+          <Button asChild variant="outline" className="flex-1">
+            <Link href="/user/dashboard">Back to Hub Discovery</Link>
           </Button>
         </div>
       </div>

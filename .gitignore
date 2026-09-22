@@ -1,27 +1,56 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# ==============================================================================
+# CHARGECONNECT — GIT IGNORE CONFIGURATION
+# ==============================================================================
 
-# dependencies
+# Dependencies
 /node_modules
+/.pnp
+.pnp.js
 
-# next.js
+# Next.js Build Outputs & Cache
 /.next/
 /out/
-
-# production
 /build
+/dist
+.next/cache/
 
-# debug
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Sensitive Environment Variables & Secrets
+.env
+.env*.local
+.env.development
+.env.test
+.env.production
+# Explicitly permit tracking the template file:
+!.env.example
+
+# Debug & Execution Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
 
-# env files
-.env*
-
-# vercel
+# Deployment & Hosting
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Operating System Artifacts
+.DS_Store
+Thumbs.db
+ehthumbs.db
+*.pem
+
+# Editor & IDE Directories
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Turbopack & Monorepo Caches
+.turbo

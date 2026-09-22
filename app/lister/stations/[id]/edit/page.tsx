@@ -1,10 +1,9 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
+import { getStationById, updateStation, deleteStation } from "@/lib/actions/stations"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,10 +14,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import Link from "next/link"
-import { ArrowLeft, MapPin, Zap, Clock, Save, X } from "lucide-react"
+import { ArrowLeft, Save, Trash2, Zap } from "lucide-react"
 
-const CONNECTOR_TYPES = ["Type 1", "Type 2", "CCS", "CHAdeMO", "Tesla"]
-const COMMON_AMENITIES = ["WiFi", "Restroom", "Food", "Shopping", "Parking", "24/7 Access", "Covered", "Security"]
+const CONNECTOR_TYPES = ["CCS2", "Type 2", "Bharat AC-001", "Bharat DC-001", "CHAdeMO", "GB/T"]
+const COMMON_AMENITIES = ["WiFi", "Restroom", "Coffee Lounge", "Food Court", "24/7 Security", "Covered Canopy", "Tyre Inflation", "CCTV"]
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -28,9 +27,9 @@ export default function EditStationPage({ params }: PageProps) {
   const router = useRouter()
   const [stationId, setStationId] = useState<string>("")
   const [isLoading, setIsLoading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([])
-  const [customAmenity, setCustomAmenity] = useState("")
 
   const [formData, setFormData] = useState({
     name: "",
@@ -38,13 +37,12 @@ export default function EditStationPage({ params }: PageProps) {
     address: "",
     city: "",
     state: "",
-    zip_code: "",
-    connector_type: "",
-    power_output: "",
-    price_per_hour: "",
-    availability_start: "00:00",
-    availability_end: "23:59",
-    is_active: true,
+    pincode: "",
+    connectorType: "CCS2",
+    powerOutput: "60",
+    pricePerKWh: "18.5",
+    openingHours: "Open 24/7",
+    isActive: true,
   })
 
   useEffect(() => {
@@ -52,32 +50,28 @@ export default function EditStationPage({ params }: PageProps) {
       const resolvedParams = await params
       setStationId(resolvedParams.id)
 
-      const supabase = createClient()
-      const { data: station, error } = await supabase
-        .from("charging_stations")
-        .select("*")
-        .eq("id", resolvedParams.id)
-        .single()
-
-      if (error || !station) {
+      const station = await getStationById(resolvedParams.id)
+      if (!station) {
         router.push("/lister/dashboard")
         return
       }
 
+      const primary = station.chargers[0]
+
       setFormData({
-        name: station.name,
+        name: station.name || "",
         description: station.description || "",
-        address: station.address,
-        city: station.city,
-        state: station.state,
-        zip_code: station.zip_code,
-        connector_type: station.connector_type,
-        power_output: station.power_output.toString(),
-        price_per_hour: station.price_per_hour.toString(),
-        availability_start: station.availability_start,
-        availability_end: station.availability_end,
-        is_active: station.is_active,
+        address: station.address || "",
+        city: station.city || "",
+        state: station.state || "",
+        pincode: station.pincode || "",
+        connectorType: primary?.connectorType || "CCS2",
+        powerOutput: primary?.powerOutput ? primary.powerOutput.toString() : "60",
+        pricePerKWh: primary?.pricePerKWh ? primary.pricePerKWh.toString() : "18.5",
+        openingHours: station.openingHours || "Open 24/7",
+        isActive: station.status === "active",
       })
+
       setSelectedAmenities(station.amenities || [])
     }
 
@@ -89,18 +83,9 @@ export default function EditStationPage({ params }: PageProps) {
   }
 
   const handleAmenityToggle = (amenity: string) => {
-    setSelectedAmenities((prev) => (prev.includes(amenity) ? prev.filter((a) => a !== amenity) : [...prev, amenity]))
-  }
-
-  const addCustomAmenity = () => {
-    if (customAmenity.trim() && !selectedAmenities.includes(customAmenity.trim())) {
-      setSelectedAmenities((prev) => [...prev, customAmenity.trim()])
-      setCustomAmenity("")
-    }
-  }
-
-  const removeAmenity = (amenity: string) => {
-    setSelectedAmenities((prev) => prev.filter((a) => a !== amenity))
+    setSelectedAmenities((prev) =>
+      prev.includes(amenity) ? prev.filter((a) => a !== amenity) : [...prev, amenity]
+    )
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -108,121 +93,107 @@ export default function EditStationPage({ params }: PageProps) {
     setIsLoading(true)
     setError(null)
 
-    const supabase = createClient()
-
     try {
-      const { error: updateError } = await supabase
-        .from("charging_stations")
-        .update({
-          name: formData.name,
-          description: formData.description || null,
-          address: formData.address,
-          city: formData.city,
-          state: formData.state,
-          zip_code: formData.zip_code,
-          connector_type: formData.connector_type,
-          power_output: Number.parseInt(formData.power_output),
-          price_per_hour: Number.parseFloat(formData.price_per_hour),
-          availability_start: formData.availability_start,
-          availability_end: formData.availability_end,
-          amenities: selectedAmenities,
-          is_active: formData.is_active,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", stationId)
-
-      if (updateError) throw updateError
+      await updateStation(stationId, {
+        name: formData.name,
+        description: formData.description,
+        address: formData.address,
+        city: formData.city,
+        state: formData.state,
+        pincode: formData.pincode,
+        amenities: selectedAmenities,
+        openingHours: formData.openingHours,
+        status: formData.isActive ? "active" : "inactive",
+        powerOutput: Number(formData.powerOutput),
+        pricePerKWh: Number(formData.pricePerKWh),
+        connectorType: formData.connectorType,
+      })
 
       router.push(`/lister/stations/${stationId}`)
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred")
+      router.refresh()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to update station")
     } finally {
       setIsLoading(false)
     }
   }
 
+  const handleDelete = async () => {
+    if (!confirm("Are you sure you want to remove this station and all its charging bays from the grid?")) {
+      return
+    }
+
+    setIsDeleting(true)
+    try {
+      await deleteStation(stationId)
+      router.push("/lister/dashboard")
+      router.refresh()
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to delete station")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href={`/lister/stations/${stationId}`}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Station
-            </Link>
-          </Button>
-          <div className="flex items-center gap-2">
-            <Zap className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold">Edit Station</span>
+      <header className="border-b bg-card">
+        <div className="container mx-auto px-6 py-4 flex items-center justify-between max-w-4xl">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
+              <Link href={`/lister/stations/${stationId}`}>
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Cancel
+              </Link>
+            </Button>
+            <div className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-primary" />
+              <span className="text-lg font-bold tracking-tight">Configure Station</span>
+            </div>
           </div>
+          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={isDeleting}>
+            <Trash2 className="h-4 w-4 mr-2" />
+            {isDeleting ? "Removing..." : "Delete Station"}
+          </Button>
         </div>
       </header>
 
-      <div className="container mx-auto p-6 max-w-4xl">
-        <Card>
+      <div className="container mx-auto p-6 max-w-3xl">
+        <Card className="border-border">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Save className="h-5 w-5" />
-              Edit Charging Station
-            </CardTitle>
-            <CardDescription>Update your station details and settings</CardDescription>
+            <CardTitle className="text-xl">Edit Station & Tariff</CardTitle>
+            <CardDescription>Update your EV charging hub parameters and connector details.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Station Status */}
-              <div className="flex items-center justify-between p-4 border rounded-lg">
+              {/* Active Toggle */}
+              <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
                 <div>
-                  <h3 className="font-medium">Station Status</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {formData.is_active ? "Station is active and accepting bookings" : "Station is inactive"}
-                  </p>
+                  <Label htmlFor="active-toggle" className="font-semibold text-base">Operational Status</Label>
+                  <p className="text-xs text-muted-foreground">When active, drivers can discover and reserve bays.</p>
                 </div>
                 <Switch
-                  checked={formData.is_active}
-                  onCheckedChange={(checked) => handleInputChange("is_active", checked)}
+                  id="active-toggle"
+                  checked={formData.isActive}
+                  onCheckedChange={(checked) => handleInputChange("isActive", checked)}
                 />
               </div>
 
-              {/* Basic Information */}
+              {/* Station Info */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  Basic Information
-                </h3>
-
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Station Name *</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => handleInputChange("name", e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="connector_type">Connector Type *</Label>
-                    <Select
-                      value={formData.connector_type}
-                      onValueChange={(value) => handleInputChange("connector_type", value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CONNECTOR_TYPES.map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {type}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="name">Station Name</Label>
+                  <Input
+                    id="name"
+                    required
+                    value={formData.name}
+                    onChange={(e) => handleInputChange("name", e.target.value)}
+                  />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
+                <div className="grid gap-2">
+                  <Label htmlFor="description">Overview Description</Label>
                   <Textarea
                     id="description"
                     value={formData.description}
@@ -230,122 +201,110 @@ export default function EditStationPage({ params }: PageProps) {
                     rows={3}
                   />
                 </div>
-              </div>
 
-              {/* Location */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Location</h3>
-
-                <div className="space-y-2">
-                  <Label htmlFor="address">Street Address *</Label>
+                <div className="grid gap-2">
+                  <Label htmlFor="address">Street Address</Label>
                   <Input
                     id="address"
+                    required
                     value={formData.address}
                     onChange={(e) => handleInputChange("address", e.target.value)}
-                    required
                   />
                 </div>
 
-                <div className="grid md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="city">City *</Label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="city">City</Label>
                     <Input
                       id="city"
+                      required
                       value={formData.city}
                       onChange={(e) => handleInputChange("city", e.target.value)}
-                      required
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="state">State *</Label>
+                  <div className="grid gap-2">
+                    <Label htmlFor="state">State</Label>
                     <Input
                       id="state"
+                      required
                       value={formData.state}
                       onChange={(e) => handleInputChange("state", e.target.value)}
-                      required
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="zip_code">ZIP Code *</Label>
+                  <div className="grid gap-2">
+                    <Label htmlFor="pincode">PIN Code</Label>
                     <Input
-                      id="zip_code"
-                      value={formData.zip_code}
-                      onChange={(e) => handleInputChange("zip_code", e.target.value)}
+                      id="pincode"
                       required
+                      value={formData.pincode}
+                      onChange={(e) => handleInputChange("pincode", e.target.value)}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Technical Specifications */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <Zap className="h-4 w-4" />
-                  Technical Specifications
-                </h3>
+              {/* Charger Specs */}
+              <div className="space-y-4 pt-2 border-t">
+                <h3 className="text-base font-semibold">Primary Charging Bay</h3>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="power_output">Power Output (kW) *</Label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="connectorType">Connector</Label>
+                    <Select
+                      value={formData.connectorType}
+                      onValueChange={(val) => handleInputChange("connectorType", val)}
+                    >
+                      <SelectTrigger id="connectorType">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CONNECTOR_TYPES.map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {t}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="powerOutput">Power (kW)</Label>
                     <Input
-                      id="power_output"
+                      id="powerOutput"
                       type="number"
-                      min="1"
-                      max="350"
-                      value={formData.power_output}
-                      onChange={(e) => handleInputChange("power_output", e.target.value)}
                       required
+                      value={formData.powerOutput}
+                      onChange={(e) => handleInputChange("powerOutput", e.target.value)}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="price_per_hour">Price per Hour ($) *</Label>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="pricePerKWh">Rate (₹/kWh)</Label>
                     <Input
-                      id="price_per_hour"
+                      id="pricePerKWh"
                       type="number"
-                      min="0"
-                      step="0.01"
-                      value={formData.price_per_hour}
-                      onChange={(e) => handleInputChange("price_per_hour", e.target.value)}
+                      step="0.5"
                       required
+                      value={formData.pricePerKWh}
+                      onChange={(e) => handleInputChange("pricePerKWh", e.target.value)}
                     />
                   </div>
                 </div>
-              </div>
 
-              {/* Availability */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  Availability Hours
-                </h3>
-
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="availability_start">Available From</Label>
-                    <Input
-                      id="availability_start"
-                      type="time"
-                      value={formData.availability_start}
-                      onChange={(e) => handleInputChange("availability_start", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="availability_end">Available Until</Label>
-                    <Input
-                      id="availability_end"
-                      type="time"
-                      value={formData.availability_end}
-                      onChange={(e) => handleInputChange("availability_end", e.target.value)}
-                    />
-                  </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="openingHours">Operating Hours</Label>
+                  <Input
+                    id="openingHours"
+                    value={formData.openingHours}
+                    onChange={(e) => handleInputChange("openingHours", e.target.value)}
+                  />
                 </div>
               </div>
 
               {/* Amenities */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Amenities</h3>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="space-y-3 pt-2 border-t">
+                <h3 className="text-base font-semibold">Amenities</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {COMMON_AMENITIES.map((amenity) => (
                     <div key={amenity} className="flex items-center space-x-2">
                       <Checkbox
@@ -353,47 +312,23 @@ export default function EditStationPage({ params }: PageProps) {
                         checked={selectedAmenities.includes(amenity)}
                         onCheckedChange={() => handleAmenityToggle(amenity)}
                       />
-                      <Label htmlFor={amenity} className="text-sm">
+                      <Label htmlFor={amenity} className="text-xs font-normal cursor-pointer">
                         {amenity}
                       </Label>
                     </div>
                   ))}
                 </div>
+              </div>
 
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add custom amenity"
-                    value={customAmenity}
-                    onChange={(e) => setCustomAmenity(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addCustomAmenity())}
-                  />
-                  <Button type="button" variant="outline" onClick={addCustomAmenity}>
-                    Add
-                  </Button>
+              {error && (
+                <div className="p-3.5 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm font-medium">
+                  {error}
                 </div>
+              )}
 
-                {selectedAmenities.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {selectedAmenities.map((amenity) => (
-                      <Badge key={amenity} variant="secondary" className="flex items-center gap-1">
-                        {amenity}
-                        <X className="h-3 w-3 cursor-pointer" onClick={() => removeAmenity(amenity)} />
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {error && <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">{error}</div>}
-
-              <div className="flex gap-4 pt-4">
-                <Button type="submit" disabled={isLoading} className="flex-1">
-                  {isLoading ? "Saving Changes..." : "Save Changes"}
-                </Button>
-                <Button type="button" variant="outline" asChild className="flex-1 bg-transparent">
-                  <Link href={`/lister/stations/${stationId}`}>Cancel</Link>
-                </Button>
-              </div>
+              <Button type="submit" className="w-full h-11 text-base font-semibold" disabled={isLoading}>
+                {isLoading ? "Saving changes..." : "Save Changes"}
+              </Button>
             </form>
           </CardContent>
         </Card>

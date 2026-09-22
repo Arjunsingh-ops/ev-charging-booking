@@ -5,9 +5,8 @@ import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
-  generator: 'v0.app',
+  title: 'ChargeConnect | EV Charging Infrastructure Platform India',
+  description: 'Discover, reserve, and operate EV charging infrastructure across India with transparent INR pricing and real-time slot availability.',
 }
 
 export default function RootLayout({

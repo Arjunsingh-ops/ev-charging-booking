@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { getCurrentUser } from "@/lib/auth"
+import { getStationById } from "@/lib/actions/stations"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
-import { ArrowLeft, MapPin, Zap, Edit, Calendar, DollarSign, Star } from "lucide-react"
+import { ArrowLeft, MapPin, Zap, Edit, Calendar, IndianRupee, Star, Clock } from "lucide-react"
+import { formatCurrency } from "@/lib/utils"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -12,73 +14,39 @@ interface PageProps {
 
 export default async function StationDetailsPage({ params }: PageProps) {
   const { id } = await params
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) {
     redirect("/auth/login")
   }
 
-  // Fetch station details
-  const { data: station, error } = await supabase
-    .from("charging_stations")
-    .select("*")
-    .eq("id", id)
-    .eq("lister_id", user.id)
-    .single()
-
-  if (error || !station) {
+  const station = await getStationById(id)
+  if (!station) {
     redirect("/lister/dashboard")
   }
 
-  // Fetch station bookings
-  const { data: bookings } = await supabase
-    .from("bookings")
-    .select(`
-      *,
-      profiles!bookings_user_id_fkey(full_name)
-    `)
-    .eq("station_id", id)
-    .order("created_at", { ascending: false })
-
-  // Fetch reviews
-  const { data: reviews } = await supabase
-    .from("reviews")
-    .select(`
-      *,
-      profiles!reviews_user_id_fkey(full_name)
-    `)
-    .eq("station_id", id)
-    .order("created_at", { ascending: false })
-
-  const totalBookings = bookings?.length || 0
-  const completedBookings = bookings?.filter((b) => b.status === "completed")?.length || 0
-  const totalRevenue =
-    bookings
-      ?.filter((b) => b.status === "completed")
-      ?.reduce((sum, b) => sum + Number.parseFloat(b.total_price || "0"), 0) || 0
-  const averageRating = reviews?.length ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length : 0
+  const primaryCharger = station.chargers[0]
+  const avgRate = station.chargers.length > 0
+    ? station.chargers[0].pricePerKWh
+    : 18
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+      <header className="border-b bg-card">
+        <div className="container mx-auto px-6 py-4 flex items-center justify-between max-w-6xl">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" asChild>
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
               <Link href="/lister/dashboard">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Dashboard
               </Link>
             </Button>
             <div className="flex items-center gap-2">
-              <Zap className="h-6 w-6 text-primary" />
-              <span className="text-xl font-bold">{station.name}</span>
+              <Zap className="h-5 w-5 text-primary" />
+              <span className="text-lg font-bold tracking-tight">{station.name}</span>
             </div>
           </div>
-          <Button asChild>
+          <Button asChild size="sm">
             <Link href={`/lister/stations/${id}/edit`}>
               <Edit className="h-4 w-4 mr-2" />
               Edit Station
@@ -91,64 +59,79 @@ export default async function StationDetailsPage({ params }: PageProps) {
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Station Details */}
           <div className="lg:col-span-2 space-y-6">
-            <Card>
+            <Card className="border-border">
               <CardHeader>
                 <div className="flex justify-between items-start">
                   <div>
                     <CardTitle className="text-2xl">{station.name}</CardTitle>
-                    <CardDescription className="flex items-center gap-1 mt-1">
-                      <MapPin className="h-4 w-4" />
-                      {station.address}, {station.city}, {station.state} {station.zip_code}
+                    <CardDescription className="flex items-center gap-1 mt-1 text-sm">
+                      <MapPin className="h-4 w-4 text-primary shrink-0" />
+                      {station.address}, {station.city}, {station.state} - {station.pincode}
                     </CardDescription>
                   </div>
-                  <Badge variant={station.is_active ? "default" : "secondary"}>
-                    {station.is_active ? "Active" : "Inactive"}
+                  <Badge
+                    variant="outline"
+                    className={
+                      station.status === "active"
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        : "bg-muted text-muted-foreground"
+                    }
+                  >
+                    {station.status === "active" ? "Operational" : station.status}
                   </Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {station.description && <p className="text-muted-foreground">{station.description}</p>}
+              <CardContent className="space-y-5">
+                {station.description && (
+                  <p className="text-muted-foreground text-sm leading-relaxed">{station.description}</p>
+                )}
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Connector Type:</span>
-                      <span className="font-medium">{station.connector_type}</span>
+                <div className="grid md:grid-cols-2 gap-4 pt-2">
+                  <div className="border rounded-lg p-4 bg-muted/40 space-y-2 text-sm">
+                    <div className="font-semibold text-foreground flex items-center gap-2 mb-2">
+                      <Zap className="h-4 w-4 text-primary" />
+                      Charging Hardware
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Power Output:</span>
-                      <span className="font-medium">{station.power_output} kW</span>
+                      <span className="text-muted-foreground">Primary Connector:</span>
+                      <span className="font-medium">{primaryCharger?.connectorType || "CCS2"}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Price per Hour:</span>
-                      <span className="font-medium">${station.price_per_hour}</span>
+                      <span className="text-muted-foreground">Power Rating:</span>
+                      <span className="font-medium">{primaryCharger?.powerOutput || 60} kW</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Tariff Rate:</span>
+                      <span className="font-bold text-foreground">{formatCurrency(avgRate)} / kWh</span>
                     </div>
                   </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Available From:</span>
-                      <span className="font-medium">{station.availability_start}</span>
+
+                  <div className="border rounded-lg p-4 bg-muted/40 space-y-2 text-sm">
+                    <div className="font-semibold text-foreground flex items-center gap-2 mb-2">
+                      <Clock className="h-4 w-4 text-primary" />
+                      Station Operations
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Available Until:</span>
-                      <span className="font-medium">{station.availability_end}</span>
+                      <span className="text-muted-foreground">Operating Schedule:</span>
+                      <span className="font-medium">{station.openingHours}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Average Rating:</span>
-                      <span className="font-medium flex items-center gap-1">
-                        <Star className="h-4 w-4 fill-current text-yellow-500" />
-                        {averageRating > 0 ? averageRating.toFixed(1) : "No ratings"}
-                      </span>
+                      <span className="text-muted-foreground">Total Bays:</span>
+                      <span className="font-medium">{station.chargers.length} bays deployed</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Customer Rating:</span>
+                      <span className="font-medium text-amber-400">★ {station.rating}</span>
                     </div>
                   </div>
                 </div>
 
                 {station.amenities && station.amenities.length > 0 && (
-                  <div>
-                    <h4 className="font-medium mb-2">Amenities</h4>
+                  <div className="pt-2">
+                    <h4 className="font-semibold text-sm mb-2">Configured Amenities</h4>
                     <div className="flex flex-wrap gap-2">
-                      {station.amenities.map((amenity, index) => (
-                        <Badge key={index} variant="outline">
+                      {station.amenities.map((amenity: string, index: number) => (
+                        <Badge key={index} variant="secondary" className="bg-muted text-foreground">
                           {amenity}
                         </Badge>
                       ))}
@@ -158,121 +141,74 @@ export default async function StationDetailsPage({ params }: PageProps) {
               </CardContent>
             </Card>
 
-            {/* Recent Bookings */}
-            <Card>
+            {/* Individual Bays */}
+            <Card className="border-border">
               <CardHeader>
-                <CardTitle>Recent Bookings</CardTitle>
-                <CardDescription>Latest reservations for this station</CardDescription>
+                <CardTitle className="text-lg">Configured Charging Bays ({station.chargers.length})</CardTitle>
               </CardHeader>
-              <CardContent>
-                {bookings && bookings.length > 0 ? (
-                  <div className="space-y-4">
-                    {bookings.slice(0, 5).map((booking) => (
-                      <div key={booking.id} className="flex justify-between items-center p-3 border rounded-lg">
-                        <div>
-                          <p className="font-medium">{booking.profiles?.full_name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {new Date(booking.start_time).toLocaleDateString()} at{" "}
-                            {new Date(booking.start_time).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <Badge
-                            variant={
-                              booking.status === "completed"
-                                ? "default"
-                                : booking.status === "confirmed"
-                                  ? "secondary"
-                                  : booking.status === "cancelled"
-                                    ? "destructive"
-                                    : "outline"
-                            }
-                          >
-                            {booking.status}
-                          </Badge>
-                          <p className="text-sm text-muted-foreground">${booking.total_price}</p>
-                        </div>
+              <CardContent className="space-y-3">
+                {station.chargers.map((c) => (
+                  <div key={c.id} className="flex justify-between items-center p-3.5 border rounded-lg bg-card">
+                    <div>
+                      <div className="font-semibold text-sm">{c.identifier}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {c.connectorType} • {c.powerOutput} kW • {c.chargingSpeed}
                       </div>
-                    ))}
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-sm">{formatCurrency(c.pricePerKWh)}/kWh</div>
+                      <Badge variant="outline" className="text-[10px] mt-1 bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                        {c.status}
+                      </Badge>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-muted-foreground">No bookings yet</p>
-                )}
+                ))}
               </CardContent>
             </Card>
           </div>
 
-          {/* Stats Sidebar */}
+          {/* Sidebar */}
           <div className="space-y-6">
-            <Card>
+            <Card className="border-border">
               <CardHeader>
-                <CardTitle>Station Statistics</CardTitle>
+                <CardTitle className="text-base">Site Telemetry & Rating</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Total Bookings</span>
+                    <Star className="h-4 w-4 text-amber-400" />
+                    <span className="text-sm">Driver Rating</span>
                   </div>
-                  <span className="font-bold">{totalBookings}</span>
+                  <span className="font-bold">{station.rating} / 5</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Completed</span>
+                    <Calendar className="h-4 w-4 text-primary" />
+                    <span className="text-sm">Feedback Reviews</span>
                   </div>
-                  <span className="font-bold">{completedBookings}</span>
+                  <span className="font-bold">{station.reviews.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Total Revenue</span>
+                    <IndianRupee className="h-4 w-4 text-emerald-400" />
+                    <span className="text-sm">Active Pricing</span>
                   </div>
-                  <span className="font-bold">${totalRevenue.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <Star className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Reviews</span>
-                  </div>
-                  <span className="font-bold">{reviews?.length || 0}</span>
+                  <span className="font-bold">{formatCurrency(avgRate)}/kWh</span>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Recent Reviews */}
-            <Card>
+            <Card className="border-border">
               <CardHeader>
-                <CardTitle>Recent Reviews</CardTitle>
+                <CardTitle className="text-base">Quick Actions</CardTitle>
               </CardHeader>
-              <CardContent>
-                {reviews && reviews.length > 0 ? (
-                  <div className="space-y-4">
-                    {reviews.slice(0, 3).map((review) => (
-                      <div key={review.id} className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="font-medium text-sm">{review.profiles?.full_name}</span>
-                          <div className="flex items-center gap-1">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`h-3 w-3 ${
-                                  i < review.rating ? "fill-current text-yellow-500" : "text-gray-300"
-                                }`}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        {review.comment && <p className="text-sm text-muted-foreground">{review.comment}</p>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground text-sm">No reviews yet</p>
-                )}
+              <CardContent className="space-y-3">
+                <Button className="w-full" asChild>
+                  <Link href={`/lister/stations/${id}/edit`}>Edit Details & Rates</Link>
+                </Button>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href={`/user/stations/${id}`}>Preview Public Driver View</Link>
+                </Button>
               </CardContent>
             </Card>
           </div>

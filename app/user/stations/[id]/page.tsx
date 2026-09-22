@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { getCurrentUser } from "@/lib/auth"
+import { getStationById } from "@/lib/actions/stations"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
-import { ArrowLeft, MapPin, Zap, Star, Calendar, User } from "lucide-react"
+import { ArrowLeft, MapPin, Zap, Star, Calendar, User, Clock, Navigation } from "lucide-react"
+import { formatCurrency } from "@/lib/utils"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -12,242 +14,249 @@ interface PageProps {
 
 export default async function UserStationDetailsPage({ params }: PageProps) {
   const { id } = await params
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) {
-    redirect("/auth/login")
+    redirect(`/auth/login?redirect=/user/stations/${id}`)
   }
 
-  // Verify user type
-  const { data: profile } = await supabase.from("profiles").select("user_type").eq("id", user.id).single()
-
-  if (profile?.user_type !== "user") {
-    redirect("/lister/dashboard")
-  }
-
-  // Fetch station details
-  const { data: station, error } = await supabase
-    .from("charging_stations")
-    .select(`
-      *,
-      profiles!charging_stations_lister_id_fkey(full_name)
-    `)
-    .eq("id", id)
-    .eq("is_active", true)
-    .single()
-
-  if (error || !station) {
+  const station = await getStationById(id)
+  if (!station) {
     redirect("/user/dashboard")
   }
 
-  // Fetch reviews
-  const { data: reviews } = await supabase
-    .from("reviews")
-    .select(`
-      *,
-      profiles!reviews_user_id_fkey(full_name)
-    `)
-    .eq("station_id", id)
-    .order("created_at", { ascending: false })
-
-  const averageRating = reviews?.length ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length : 0
+  const primaryCharger = station.chargers[0]
+  const lowestRate = station.chargers.length > 0
+    ? Math.min(...station.chargers.map((c) => c.pricePerKWh))
+    : 18
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+      <header className="border-b bg-card sticky top-0 z-10">
+        <div className="container mx-auto px-6 py-4 flex items-center justify-between max-w-7xl">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" asChild>
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
               <Link href="/user/dashboard">
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Search
+                Back
               </Link>
             </Button>
-            <div className="flex items-center gap-2">
-              <Zap className="h-6 w-6 text-primary" />
-              <span className="text-xl font-bold">{station.name}</span>
+            <div className="flex items-center gap-2 border-l pl-4 border-border">
+              <Zap className="h-5 w-5 text-primary" />
+              <span className="text-lg font-semibold tracking-tight">ChargeConnect</span>
             </div>
           </div>
-          <Button asChild size="lg">
-            <Link href={`/user/stations/${id}/book`}>
-              <Calendar className="h-4 w-4 mr-2" />
-              Book Now
-            </Link>
-          </Button>
         </div>
       </header>
 
       <div className="container mx-auto p-6 max-w-6xl">
-        <div className="grid lg:grid-cols-3 gap-6">
+        {/* Main Station Info Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 border-b pb-8">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                {station.status === "active" ? "Operational" : station.status}
+              </Badge>
+              <span className="flex items-center text-sm font-medium">
+                <Star className="h-4 w-4 text-amber-500 fill-amber-500 mr-1" />
+                {station.rating} ({station.totalRatings || station.reviews.length} reviews)
+              </span>
+            </div>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-2">{station.name}</h1>
+            <p className="text-muted-foreground flex items-center gap-2 text-base">
+              <MapPin className="h-4 w-4 text-primary shrink-0" />
+              {station.address}, {station.city}, {station.state} - {station.pincode}
+            </p>
+          </div>
+          <div className="flex flex-col md:items-end gap-2">
+            <div className="text-3xl font-bold text-foreground">
+              {formatCurrency(lowestRate)}
+              <span className="text-sm text-muted-foreground font-normal"> /kWh</span>
+            </div>
+            <Button asChild size="lg" className="w-full md:w-auto">
+              <Link href={`/user/stations/${id}/book`}>
+                <Calendar className="h-4 w-4 mr-2" />
+                Reserve Charging Bay
+              </Link>
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-8">
           {/* Station Details */}
-          <div className="lg:col-span-2 space-y-6">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <CardTitle className="text-2xl">{station.name}</CardTitle>
-                    <CardDescription className="flex items-center gap-1 mt-1">
-                      <MapPin className="h-4 w-4" />
-                      {station.address}, {station.city}, {station.state} {station.zip_code}
-                    </CardDescription>
+          <div className="lg:col-span-2 space-y-8">
+            <section>
+              <h2 className="text-xl font-bold mb-3">About this Charging Hub</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                {station.description || "High-reliability EV charging infrastructure compliant with Bharat EV and CCS2 standards."}
+              </p>
+            </section>
+
+            {/* Available Bays & Chargers */}
+            <section>
+              <h2 className="text-xl font-bold mb-4">Charging Bays ({station.chargers.length})</h2>
+              <div className="grid sm:grid-cols-2 gap-4">
+                {station.chargers.map((charger) => (
+                  <div key={charger.id} className="border rounded-lg p-4 bg-card hover:border-border/80 transition">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="font-semibold text-base">{charger.identifier}</div>
+                      <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-xs">
+                        {charger.status}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1.5 text-sm text-muted-foreground">
+                      <div className="flex justify-between">
+                        <span>Connector:</span>
+                        <span className="font-medium text-foreground">{charger.connectorType}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Power Output:</span>
+                        <span className="font-medium text-foreground">{charger.powerOutput} kW</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Rate:</span>
+                        <span className="font-bold text-foreground">{formatCurrency(charger.pricePerKWh)} / kWh</span>
+                      </div>
+                    </div>
                   </div>
-                  <Badge variant="secondary">Available</Badge>
+                ))}
+              </div>
+            </section>
+
+            <section className="grid sm:grid-cols-2 gap-6">
+              <div className="border rounded-lg p-5 bg-card">
+                <div className="flex items-center gap-2 mb-3 text-muted-foreground">
+                  <Zap className="h-5 w-5 text-primary" />
+                  <h3 className="font-semibold text-foreground">Fast Charging Specs</h3>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {station.description && <p className="text-muted-foreground">{station.description}</p>}
-
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Connector Type:</span>
-                      <span className="font-medium">{station.connector_type}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Power Output:</span>
-                      <span className="font-medium">{station.power_output} kW</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Price per Hour:</span>
-                      <span className="font-medium text-lg">${station.price_per_hour}</span>
-                    </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Max Power:</span>
+                    <span className="font-medium">{primaryCharger?.powerOutput || 60} kW</span>
                   </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Available Hours:</span>
-                      <span className="font-medium">
-                        {station.availability_start} - {station.availability_end}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Station Owner:</span>
-                      <span className="font-medium">{station.profiles?.full_name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Average Rating:</span>
-                      <span className="font-medium flex items-center gap-1">
-                        <Star className="h-4 w-4 fill-current text-yellow-500" />
-                        {averageRating > 0 ? averageRating.toFixed(1) : "No ratings"}
-                        {reviews?.length ? `(${reviews.length})` : ""}
-                      </span>
-                    </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Architecture:</span>
+                    <span className="font-medium">400V / 800V Compatible</span>
                   </div>
                 </div>
+              </div>
 
-                {station.amenities && station.amenities.length > 0 && (
-                  <div>
-                    <h4 className="font-medium mb-2">Amenities</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {station.amenities.map((amenity, index) => (
-                        <Badge key={index} variant="outline">
-                          {amenity}
-                        </Badge>
-                      ))}
-                    </div>
+              <div className="border rounded-lg p-5 bg-card">
+                <div className="flex items-center gap-2 mb-3 text-muted-foreground">
+                  <Clock className="h-5 w-5 text-primary" />
+                  <h3 className="font-semibold text-foreground">Operational Hours</h3>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Schedule:</span>
+                    <span className="font-medium">{station.openingHours}</span>
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Access:</span>
+                    <span className="font-medium">Public Access</span>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-            {/* Reviews */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Reviews ({reviews?.length || 0})</CardTitle>
-                <CardDescription>What other EV drivers are saying</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {reviews && reviews.length > 0 ? (
-                  <div className="space-y-4">
-                    {reviews.map((review) => (
-                      <div key={review.id} className="border-b pb-4 last:border-b-0">
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex items-center gap-2">
+            {station.amenities && station.amenities.length > 0 && (
+              <section>
+                <h2 className="text-xl font-bold mb-4">Hub Amenities</h2>
+                <div className="flex flex-wrap gap-2">
+                  {station.amenities.map((amenity: string, index: number) => (
+                    <Badge key={index} variant="secondary" className="bg-muted text-foreground py-1 px-2.5">
+                      {amenity}
+                    </Badge>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section>
+              <h2 className="text-xl font-bold mb-4">User Reviews & Telemetry</h2>
+              {station.reviews && station.reviews.length > 0 ? (
+                <div className="space-y-3">
+                  {station.reviews.map((review) => (
+                    <div key={review.id} className="border rounded-lg p-4 bg-card">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2">
+                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
                             <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium">{review.profiles?.full_name}</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`h-4 w-4 ${
-                                  i < review.rating ? "fill-current text-yellow-500" : "text-gray-300"
-                                }`}
-                              />
-                            ))}
+                          <div>
+                            <div className="font-medium text-sm">{review.userName}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {new Date(review.createdAt).toLocaleDateString("en-IN")}
+                            </div>
                           </div>
                         </div>
-                        {review.comment && <p className="text-muted-foreground">{review.comment}</p>}
-                        <p className="text-xs text-muted-foreground mt-2">
-                          {new Date(review.created_at).toLocaleDateString()}
-                        </p>
+                        <div className="flex items-center text-amber-400">
+                          {"★".repeat(review.rating)}
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">No reviews yet. Be the first to review this station!</p>
-                )}
-              </CardContent>
-            </Card>
+                      {review.comment && <p className="text-sm text-foreground mt-2">{review.comment}</p>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="border border-dashed rounded-lg p-8 text-center bg-card">
+                  <p className="text-muted-foreground text-sm">No reviews yet. Book a session and be the first to review!</p>
+                </div>
+              )}
+            </section>
           </div>
 
-          {/* Booking Sidebar */}
+          {/* Sidebar */}
           <div className="space-y-6">
-            <Card>
+            <Card className="bg-card border shadow-sm">
               <CardHeader>
-                <CardTitle>Quick Booking</CardTitle>
-                <CardDescription>Reserve your charging session</CardDescription>
+                <CardTitle className="text-lg">Location Navigation</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">${station.price_per_hour}</div>
-                  <div className="text-sm text-muted-foreground">per hour</div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Power Output:</span>
-                    <span className="font-medium">{station.power_output} kW</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Connector:</span>
-                    <span className="font-medium">{station.connector_type}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Available:</span>
-                    <span className="font-medium">
-                      {station.availability_start} - {station.availability_end}
-                    </span>
+                <div className="p-4 bg-muted/60 rounded-md border text-xs space-y-2">
+                  <div className="font-semibold text-foreground">{station.name}</div>
+                  <div className="text-muted-foreground">{station.address}, {station.city}</div>
+                  <div className="font-mono text-muted-foreground">
+                    Coords: {station.latitude.toFixed(4)}° N, {station.longitude.toFixed(4)}° E
                   </div>
                 </div>
-
-                <Button asChild className="w-full" size="lg">
-                  <Link href={`/user/stations/${id}/book`}>
-                    <Calendar className="h-4 w-4 mr-2" />
-                    Book This Station
-                  </Link>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={undefined}
+                  asChild
+                >
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Navigation className="h-4 w-4 mr-2" />
+                    Open in Google Maps
+                  </a>
                 </Button>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-card shadow-sm border">
               <CardHeader>
-                <CardTitle>Estimated Charging Time</CardTitle>
+                <CardTitle className="text-lg">Typical Indian EV Charging Times</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex justify-between text-sm">
-                  <span>0-80% (typical):</span>
-                  <span className="font-medium">~45 min</span>
+                  <span className="text-muted-foreground">Tata Nexon EV (10-80%):</span>
+                  <span className="font-semibold">~45 min (60kW DC)</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span>Full charge:</span>
-                  <span className="font-medium">~1.5 hours</span>
+                  <span className="text-muted-foreground">MG ZS EV (10-80%):</span>
+                  <span className="font-semibold">~42 min (60kW DC)</span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  *Estimates based on {station.power_output}kW output. Actual time varies by vehicle.
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Mahindra XUV400 (10-80%):</span>
+                  <span className="font-semibold">~50 min (50kW DC)</span>
+                </div>
+                <p className="text-xs text-muted-foreground pt-3 border-t">
+                  *Actual session duration depends on ambient battery temperature and vehicle BMS charging curve.
                 </p>
               </CardContent>
             </Card>
