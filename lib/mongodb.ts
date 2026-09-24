@@ -1,4 +1,15 @@
 import mongoose from "mongoose"
+import dns from "dns"
+
+// Use public DNS servers for MongoDB Atlas SRV resolution
+// Some local/ISP DNS servers fail to resolve _mongodb._tcp SRV records
+try {
+  const currentServers = dns.getServers()
+  // Put public DNS first so SRV lookups succeed, keep local DNS as fallback
+  dns.setServers(["8.8.8.8", "1.1.1.1", ...currentServers])
+} catch {
+  // Silently ignore if DNS configuration fails
+}
 
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/chargeconnect"
 const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || "chargeconnect"

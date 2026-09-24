@@ -1,5 +1,17 @@
 import mongoose from "mongoose"
 import bcrypt from "bcryptjs"
+import dns from "dns"
+
+// Use public DNS servers as fallback for MongoDB Atlas SRV resolution
+try {
+  const currentServers = dns.getServers()
+  const hasPublicDNS = currentServers.some(s => s === "8.8.8.8" || s === "1.1.1.1")
+  if (!hasPublicDNS) {
+    dns.setServers([...currentServers, "8.8.8.8", "1.1.1.1"])
+  }
+} catch {
+  // Silently ignore
+}
 
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/chargeconnect"
 const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || "chargeconnect"
